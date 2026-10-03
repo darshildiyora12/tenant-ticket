@@ -1,8 +1,12 @@
+import { existsSync } from 'node:fs';
 import { createApp } from './app';
 import { loadConfig } from './config';
 import { openDb } from './db';
 import { createProviders } from './providers';
 import { TriageWorker } from './worker';
+
+// Settings can come from an optional .env file (see .env.example).
+if (existsSync('.env')) process.loadEnvFile('.env');
 
 const config = loadConfig();
 const db = openDb(config.dbPath);
