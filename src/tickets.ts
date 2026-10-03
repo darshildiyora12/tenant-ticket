@@ -37,14 +37,33 @@ export function insertTicket(
   db: DB,
   tenantId: string,
   input: CreateTicketInput,
+  idempotencyKey: string | null = null,
 ): { id: string; status: TicketStatus } {
   const id = randomUUID();
   const timestamp = now();
   db.prepare(
-    `INSERT INTO tickets (id, tenant_id, subject, body, customer_email, channel, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
-  ).run(id, tenantId, input.subject, input.body, input.customerEmail, input.channel, timestamp, timestamp);
+    `INSERT INTO tickets
+       (id, tenant_id, idempotency_key, subject, body, customer_email, channel, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
+  ).run(
+    id,
+    tenantId,
+    idempotencyKey,
+    input.subject,
+    input.body,
+    input.customerEmail,
+    input.channel,
+    timestamp,
+    timestamp,
+  );
   return { id, status: 'queued' };
+}
+
+/** Keys are scoped to the tenant: two tenants may use the same key without clashing. */
+export function findByIdempotencyKey(db: DB, tenantId: string, key: string): TicketRow | undefined {
+  return db
+    .prepare('SELECT * FROM tickets WHERE tenant_id = ? AND idempotency_key = ?')
+    .get(tenantId, key) as TicketRow | undefined;
 }
 
 /** Reads one ticket. The tenant filter is part of the query, so another tenant's ticket is simply not found. */

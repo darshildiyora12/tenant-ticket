@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { AppDeps } from '../app';
 import { createTicketSchema, searchQuerySchema } from '../schemas';
 import { rankBySimilarity } from '../search';
-import { getTicket, insertTicket, toApiTicket } from '../tickets';
+import { findByIdempotencyKey, getTicket, insertTicket, toApiTicket } from '../tickets';
 
 /** 400 with one list of messages per invalid field. */
 function sendValidationError(res: Response, error: z.ZodError): void {
@@ -23,8 +23,20 @@ export function ticketRoutes(deps: AppDeps): Router {
       return;
     }
 
+    // A repeat with the same Idempotency-Key returns the original ticket and
+    // queues nothing new. better-sqlite3 is synchronous, so no other request
+    // can run between this lookup and the insert; the unique index is the backstop.
+    const idempotencyKey = req.header('idempotency-key')?.trim() || null;
+    if (idempotencyKey) {
+      const existing = findByIdempotencyKey(db, tenantId, idempotencyKey);
+      if (existing) {
+        res.status(202).json({ id: existing.id, status: existing.status });
+        return;
+      }
+    }
+
     // Only store the ticket here. The worker does the slow LLM work later.
-    const ticket = insertTicket(db, tenantId, parsed.data);
+    const ticket = insertTicket(db, tenantId, parsed.data, idempotencyKey);
     res.status(202).json(ticket);
     deps.onTicketQueued?.();
   });
