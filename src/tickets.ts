@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { DB } from './db';
-import type { CreateTicketInput } from './schemas';
+import type { CreateTicketInput, TriageResult } from './schemas';
 
 export type TicketStatus = 'queued' | 'processing' | 'triaged' | 'needs_review';
 
@@ -43,4 +43,53 @@ export function insertTicket(
      VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
   ).run(id, tenantId, input.subject, input.body, input.customerEmail, input.channel, timestamp, timestamp);
   return { id, status: 'queued' };
+}
+
+// ---- Worker queries ----
+
+/**
+ * Takes the oldest queued ticket and marks it as processing in one statement,
+ * so two workers can never claim the same ticket.
+ */
+export function claimNextQueued(db: DB): TicketRow | undefined {
+  const timestamp = now();
+  return db
+    .prepare(
+      `UPDATE tickets SET status = 'processing', processing_started_at = ?, updated_at = ?
+       WHERE id = (SELECT id FROM tickets WHERE status = 'queued' ORDER BY created_at, rowid LIMIT 1)
+       RETURNING *`,
+    )
+    .get(timestamp, timestamp) as TicketRow | undefined;
+}
+
+/**
+ * Puts tickets stuck in "processing" back in the queue. Without a cutoff it
+ * requeues all of them (startup); with one, only those that started before it.
+ */
+export function requeueStuck(db: DB, startedBefore?: string): number {
+  const cutoff = startedBefore ?? '9999-12-31';
+  const result = db
+    .prepare(
+      `UPDATE tickets SET status = 'queued', updated_at = ?
+       WHERE status = 'processing' AND processing_started_at < ?`,
+    )
+    .run(now(), cutoff);
+  return result.changes;
+}
+
+export function markTriaged(db: DB, id: string, result: TriageResult, attempts: number): void {
+  db.prepare(
+    `UPDATE tickets
+     SET status = 'triaged', category = ?, priority = ?, summary = ?, confidence = ?,
+         triage_error = NULL, llm_attempts = llm_attempts + ?, updated_at = ?
+     WHERE id = ?`,
+  ).run(result.category, result.priority, result.summary, result.confidence, attempts, now(), id);
+}
+
+export function markNeedsReview(db: DB, id: string, reason: string, attempts: number): void {
+  db.prepare(
+    `UPDATE tickets
+     SET status = 'needs_review', triage_error = ?, llm_attempts = llm_attempts + ?, updated_at = ?
+     WHERE id = ?`,
+  ).run(reason, attempts, now(), id);
 }
