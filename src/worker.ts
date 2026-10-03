@@ -68,9 +68,11 @@ export class TriageWorker {
   }
 
   private async process(ticket: TicketRow): Promise<void> {
-    const { db, llm } = this.deps;
+    const { db, llm, config } = this.deps;
     try {
-      const outcome = await triageTicket(llm, ticket);
+      const outcome = await triageTicket(llm, ticket, {
+        confidenceThreshold: config.confidenceThreshold,
+      });
       if (outcome.status === 'triaged') {
         markTriaged(db, ticket.id, outcome.result, outcome.attempts);
       } else {
