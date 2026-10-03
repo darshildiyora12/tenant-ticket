@@ -34,6 +34,34 @@ export function buildRepairPrompt(previousReply: string, problem: string): strin
 export interface TriageOptions {
   /** Below this confidence a valid reply still goes to a human. */
   confidenceThreshold: number;
+  /** Longest time to wait for one LLM call. */
+  timeoutMs: number;
+}
+
+export class LLMTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`LLM call timed out after ${timeoutMs} ms`);
+  }
+}
+
+/** Races the LLM call against a timer, so a slow model cannot block the worker. */
+async function withTimeout(
+  timeoutMs: number,
+  call: (signal: AbortSignal) => Promise<string>,
+): Promise<string> {
+  const controller = new AbortController();
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new LLMTimeoutError(timeoutMs));
+      controller.abort(); // also tells the provider to stop working on this call
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([call(controller.signal), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -45,20 +73,32 @@ export async function triageTicket(
   ticket: { subject: string; body: string },
   options: TriageOptions,
 ): Promise<TriageOutcome> {
-  let attempts = 1;
-  const firstReply = await llm.classify(ticket.subject, ticket.body);
-  let parsed = parseTriage(firstReply);
+  let attempts = 0;
+  const classify = (repairPrompt?: string): Promise<string> => {
+    attempts++;
+    return withTimeout(options.timeoutMs, (signal) =>
+      llm.classify(ticket.subject, ticket.body, { repairPrompt, signal }),
+    );
+  };
 
-  if (!parsed.ok) {
-    attempts = 2;
-    const repairPrompt = buildRepairPrompt(firstReply, parsed.error);
-    const secondReply = await llm.classify(ticket.subject, ticket.body, { repairPrompt });
-    parsed = parseTriage(secondReply);
-    if (!parsed.ok) return { status: 'needs_review', reason: 'schema_invalid_after_repair', attempts };
-  }
+  try {
+    const firstReply = await classify();
+    let parsed = parseTriage(firstReply);
 
-  if (parsed.value.confidence < options.confidenceThreshold) {
-    return { status: 'needs_review', reason: 'low_confidence', attempts };
+    if (!parsed.ok) {
+      const secondReply = await classify(buildRepairPrompt(firstReply, parsed.error));
+      parsed = parseTriage(secondReply);
+      if (!parsed.ok) return { status: 'needs_review', reason: 'schema_invalid_after_repair', attempts };
+    }
+
+    if (parsed.value.confidence < options.confidenceThreshold) {
+      return { status: 'needs_review', reason: 'low_confidence', attempts };
+    }
+    return { status: 'triaged', result: parsed.value, attempts };
+  } catch (err) {
+    // A timeout or a provider failure is not retried: the ticket goes to a human.
+    if (err instanceof LLMTimeoutError) return { status: 'needs_review', reason: 'timeout', attempts };
+    console.error('[triage] LLM call failed', err);
+    return { status: 'needs_review', reason: 'llm_error', attempts };
   }
-  return { status: 'triaged', result: parsed.value, attempts };
 }

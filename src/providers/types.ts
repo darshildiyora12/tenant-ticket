@@ -1,6 +1,8 @@
 export interface ClassifyOptions {
   /** Sent on the retry only: tells the model what was wrong with its first reply. */
   repairPrompt?: string;
+  /** Aborted when the per-call timeout fires, so the provider can cancel its request. */
+  signal?: AbortSignal;
 }
 
 export interface LLMProvider {

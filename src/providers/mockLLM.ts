@@ -45,7 +45,7 @@ export class MockLLM implements LLMProvider {
     const delay = body.includes('[[SLOW]]')
       ? this.slowDelayMs
       : this.minDelayMs + Math.random() * (this.maxDelayMs - this.minDelayMs);
-    await sleep(delay);
+    await sleep(delay, undefined, { signal: options.signal });
 
     if (body.includes('[[ALWAYS_BAD]]')) {
       // Valid JSON, but it does not match the output schema.

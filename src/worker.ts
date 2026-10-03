@@ -92,6 +92,7 @@ export class TriageWorker {
 
       const outcome = await triageTicket(llm, ticket, {
         confidenceThreshold: config.confidenceThreshold,
+        timeoutMs: config.llmTimeoutMs,
       });
       if (outcome.status === 'triaged') {
         markTriaged(db, ticket.id, outcome.result, outcome.attempts);
