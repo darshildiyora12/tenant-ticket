@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { DB } from './db';
 import type { DuplicateMatch } from './duplicates';
 import type { CreateTicketInput, TriageResult } from './schemas';
+import { round4 } from './vector';
 
 export type TicketStatus = 'queued' | 'processing' | 'triaged' | 'needs_review';
 
@@ -44,6 +45,39 @@ export function insertTicket(
      VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
   ).run(id, tenantId, input.subject, input.body, input.customerEmail, input.channel, timestamp, timestamp);
   return { id, status: 'queued' };
+}
+
+/** Reads one ticket. The tenant filter is part of the query, so another tenant's ticket is simply not found. */
+export function getTicket(db: DB, tenantId: string, id: string): TicketRow | undefined {
+  return db.prepare('SELECT * FROM tickets WHERE id = ? AND tenant_id = ?').get(id, tenantId) as
+    | TicketRow
+    | undefined;
+}
+
+/** The shape returned by GET /tickets/:id. The embedding and tenant id are never exposed. */
+export function toApiTicket(row: TicketRow) {
+  return {
+    id: row.id,
+    subject: row.subject,
+    body: row.body,
+    customerEmail: row.customer_email,
+    channel: row.channel,
+    status: row.status,
+    triage:
+      row.category === null
+        ? null
+        : {
+            category: row.category,
+            priority: row.priority,
+            summary: row.summary,
+            confidence: row.confidence,
+          },
+    triageError: row.triage_error,
+    llmAttempts: row.llm_attempts,
+    duplicateOf: row.duplicate_of,
+    duplicateScore: row.duplicate_score === null ? null : round4(row.duplicate_score),
+    createdAt: row.created_at,
+  };
 }
 
 // ---- Worker queries ----

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { AppDeps } from '../app';
 import { createTicketSchema, searchQuerySchema } from '../schemas';
 import { rankBySimilarity } from '../search';
-import { insertTicket } from '../tickets';
+import { getTicket, insertTicket, toApiTicket } from '../tickets';
 
 /** 400 with one list of messages per invalid field. */
 function sendValidationError(res: Response, error: z.ZodError): void {
@@ -41,6 +41,17 @@ export function ticketRoutes(deps: AppDeps): Router {
     const { q, limit } = parsed.data;
     const queryVector = await embedder.embed(q);
     res.json({ query: q, results: rankBySimilarity(db, tenantId, queryVector, limit) });
+  });
+
+  router.get('/:id', (req, res) => {
+    const tenantId: string = res.locals.tenantId;
+    const ticket = getTicket(db, tenantId, req.params.id);
+    if (!ticket) {
+      // Same answer for "does not exist" and "belongs to another tenant".
+      res.status(404).json({ error: 'not_found' });
+      return;
+    }
+    res.json(toApiTicket(ticket));
   });
 
   return router;
