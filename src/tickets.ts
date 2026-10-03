@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { DB } from './db';
+import type { DuplicateMatch } from './duplicates';
 import type { CreateTicketInput, TriageResult } from './schemas';
 
 export type TicketStatus = 'queued' | 'processing' | 'triaged' | 'needs_review';
@@ -82,13 +83,22 @@ export function ticketText(ticket: Pick<TicketRow, 'subject' | 'body'>): string 
   return `${ticket.subject}\n\n${ticket.body}`;
 }
 
-export function saveEmbedding(db: DB, id: string, embedding: Buffer, model: string): void {
-  db.prepare('UPDATE tickets SET embedding = ?, embedding_model = ?, updated_at = ? WHERE id = ?').run(
-    embedding,
-    model,
-    now(),
-    id,
-  );
+/**
+ * Stores the vector and the duplicate result in one statement, so "has an
+ * embedding" always means "the duplicate rule has run" (it runs once per ticket).
+ */
+export function saveEmbedding(
+  db: DB,
+  id: string,
+  embedding: Buffer,
+  model: string,
+  duplicate: DuplicateMatch | null,
+): void {
+  db.prepare(
+    `UPDATE tickets
+     SET embedding = ?, embedding_model = ?, duplicate_of = ?, duplicate_score = ?, updated_at = ?
+     WHERE id = ?`,
+  ).run(embedding, model, duplicate?.duplicateOf ?? null, duplicate?.duplicateScore ?? null, now(), id);
 }
 
 export function markTriaged(db: DB, id: string, result: TriageResult, attempts: number): void {

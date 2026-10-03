@@ -9,7 +9,8 @@ export function cosine(a: ArrayLike<number>, b: ArrayLike<number>): number {
     normB += b[i] * b[i];
   }
   if (normA === 0 || normB === 0) return 0;
-  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+  // sqrt(normA * normB) equals |a| * |b| and gives exactly 1 for identical vectors.
+  return dot / Math.sqrt(normA * normB);
 }
 
 /** Scores are rounded to 4 decimal places in API responses. */

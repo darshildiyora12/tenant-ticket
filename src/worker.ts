@@ -1,5 +1,6 @@
 import type { Config } from './config';
 import type { DB } from './db';
+import { findDuplicate } from './duplicates';
 import type { EmbeddingProvider, LLMProvider } from './providers/types';
 import {
   claimNextQueued,
@@ -11,7 +12,7 @@ import {
   type TicketRow,
 } from './tickets';
 import { triageTicket } from './triage';
-import { toBlob } from './vector';
+import { fromBlob, toBlob } from './vector';
 
 export interface WorkerDeps {
   db: DB;
@@ -82,8 +83,11 @@ export class TriageWorker {
       // Embed before triage, so the ticket has a vector even if triage fails.
       // A ticket requeued after a crash may already have one.
       if (!ticket.embedding) {
-        const vector = await embedder.embed(ticketText(ticket));
-        saveEmbedding(db, ticket.id, toBlob(vector), embedder.model);
+        const blob = toBlob(await embedder.embed(ticketText(ticket)));
+        // Compare the vector exactly as it is stored (32-bit floats), so
+        // identical text scores exactly 1.
+        const duplicate = findDuplicate(db, ticket, fromBlob(blob), config.duplicateThreshold);
+        saveEmbedding(db, ticket.id, blob, embedder.model, duplicate);
       }
 
       const outcome = await triageTicket(llm, ticket, {
