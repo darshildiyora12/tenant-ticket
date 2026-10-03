@@ -1,10 +1,13 @@
 import express, { type ErrorRequestHandler } from 'express';
 import { requireTenant } from './auth';
 import type { DB } from './db';
+import type { EmbeddingProvider } from './providers/types';
 import { ticketRoutes } from './routes/tickets';
 
 export interface AppDeps {
   db: DB;
+  /** Search embeds the query with the same provider the worker uses for tickets. */
+  embedder: EmbeddingProvider;
   /** Called after a ticket is stored, so the worker can start without waiting for its next poll. */
   onTicketQueued?: () => void;
 }

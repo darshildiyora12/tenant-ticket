@@ -13,6 +13,12 @@ export const createTicketSchema = z.object({
 
 export type CreateTicketInput = z.infer<typeof createTicketSchema>;
 
+/** Query string of GET /tickets/search. Query values arrive as strings, so limit is coerced. */
+export const searchQuerySchema = z.object({
+  q: z.string().min(2).max(200),
+  limit: z.coerce.number().int().min(1).max(20).default(5),
+});
+
 /** What the LLM must return. Every reply is checked against this before anything is stored. */
 export const triageResultSchema = z.object({
   category: z.enum(['billing', 'technical', 'account', 'feature_request', 'other']),

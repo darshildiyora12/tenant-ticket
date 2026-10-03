@@ -9,7 +9,7 @@ const db = openDb(config.dbPath);
 const { llm, embedder } = createProviders(config.aiProvider);
 
 const worker = new TriageWorker({ db, llm, embedder, config });
-const app = createApp({ db, onTicketQueued: () => worker.wake() });
+const app = createApp({ db, embedder, onTicketQueued: () => worker.wake() });
 
 worker.start();
 const server = app.listen(config.port, () => {
