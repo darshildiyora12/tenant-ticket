@@ -77,6 +77,20 @@ export function requeueStuck(db: DB, startedBefore?: string): number {
   return result.changes;
 }
 
+/** The text that gets embedded: subject and body only, exactly as stored. */
+export function ticketText(ticket: Pick<TicketRow, 'subject' | 'body'>): string {
+  return `${ticket.subject}\n\n${ticket.body}`;
+}
+
+export function saveEmbedding(db: DB, id: string, embedding: Buffer, model: string): void {
+  db.prepare('UPDATE tickets SET embedding = ?, embedding_model = ?, updated_at = ? WHERE id = ?').run(
+    embedding,
+    model,
+    now(),
+    id,
+  );
+}
+
 export function markTriaged(db: DB, id: string, result: TriageResult, attempts: number): void {
   db.prepare(
     `UPDATE tickets

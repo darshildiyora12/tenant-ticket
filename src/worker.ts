@@ -1,8 +1,17 @@
 import type { Config } from './config';
 import type { DB } from './db';
 import type { EmbeddingProvider, LLMProvider } from './providers/types';
-import { claimNextQueued, markNeedsReview, markTriaged, requeueStuck, type TicketRow } from './tickets';
+import {
+  claimNextQueued,
+  markNeedsReview,
+  markTriaged,
+  requeueStuck,
+  saveEmbedding,
+  ticketText,
+  type TicketRow,
+} from './tickets';
 import { triageTicket } from './triage';
+import { toBlob } from './vector';
 
 export interface WorkerDeps {
   db: DB;
@@ -68,8 +77,15 @@ export class TriageWorker {
   }
 
   private async process(ticket: TicketRow): Promise<void> {
-    const { db, llm, config } = this.deps;
+    const { db, llm, embedder, config } = this.deps;
     try {
+      // Embed before triage, so the ticket has a vector even if triage fails.
+      // A ticket requeued after a crash may already have one.
+      if (!ticket.embedding) {
+        const vector = await embedder.embed(ticketText(ticket));
+        saveEmbedding(db, ticket.id, toBlob(vector), embedder.model);
+      }
+
       const outcome = await triageTicket(llm, ticket, {
         confidenceThreshold: config.confidenceThreshold,
       });
