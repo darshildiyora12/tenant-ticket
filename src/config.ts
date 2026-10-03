@@ -9,6 +9,8 @@ export interface Config {
   duplicateThreshold: number;
   /** Longest time to wait for one LLM call before the ticket goes to needs_review. */
   llmTimeoutMs: number;
+  /** Most LLM calls allowed in flight at the same time. */
+  llmMaxConcurrency: number;
   /** How often the worker looks for queued tickets. */
   workerPollMs: number;
   /** A ticket in "processing" for longer than this is treated as abandoned and requeued. */
@@ -29,6 +31,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     confidenceThreshold: 0.6,
     duplicateThreshold: num(env.DUPLICATE_THRESHOLD, 0.9),
     llmTimeoutMs: num(env.LLM_TIMEOUT_MS, 5000),
+    llmMaxConcurrency: Math.max(1, Math.floor(num(env.LLM_MAX_CONCURRENCY, 3))),
     workerPollMs: num(env.WORKER_POLL_MS, 500),
     stuckAfterMs: num(env.STUCK_AFTER_MS, 60_000),
   };

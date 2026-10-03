@@ -29,6 +29,8 @@ export interface WorkerDeps {
 export class TriageWorker {
   private timer?: NodeJS.Timeout;
   private currentPass?: Promise<void>;
+  /** Tickets whose LLM triage is running right now. */
+  private readonly inFlight = new Set<Promise<void>>();
 
   constructor(private readonly deps: WorkerDeps) {}
 
@@ -54,7 +56,10 @@ export class TriageWorker {
 
   /** Process everything that is queued and wait until it is finished (tests use this). */
   async drain(): Promise<void> {
-    await this.runPass();
+    do {
+      await this.runPass();
+      await Promise.all(this.inFlight);
+    } while (this.inFlight.size > 0 || this.currentPass);
   }
 
   /** Only one pass runs at a time; callers during a pass share it. */
@@ -71,16 +76,31 @@ export class TriageWorker {
     const { db, config } = this.deps;
     requeueStuck(db, new Date(Date.now() - config.stuckAfterMs).toISOString());
 
-    for (;;) {
+    // A ticket in triage makes one LLM call at a time, so limiting the tickets
+    // in triage limits the LLM calls in flight.
+    while (this.inFlight.size < config.llmMaxConcurrency) {
       const ticket = claimNextQueued(db); // queued -> processing
       if (!ticket) return;
       try {
+        // Stage 1 runs one ticket at a time, oldest first, so the duplicate
+        // rule always sees the vector of every earlier ticket.
         const vector = await this.embedStage(ticket);
-        await this.triageStage(ticket, vector);
+        // Stage 2 runs in the background while this loop takes the next ticket.
+        this.startTriage(ticket, vector);
       } catch (err) {
         this.fail(ticket, err);
       }
     }
+  }
+
+  private startTriage(ticket: TicketRow, vector: Float32Array): void {
+    const job = this.triageStage(ticket, vector)
+      .catch((err) => this.fail(ticket, err))
+      .finally(() => {
+        this.inFlight.delete(job);
+        this.wake(); // a slot is free: look for the next queued ticket
+      });
+    this.inFlight.add(job);
   }
 
   /**
@@ -127,6 +147,11 @@ export class TriageWorker {
   /** Unexpected failure (not an LLM problem): hand the ticket to a human instead of losing it. */
   private fail(ticket: TicketRow, err: unknown): void {
     console.error(`[worker] ticket ${ticket.id} failed`, err);
-    markNeedsReview(this.deps.db, ticket.id, 'worker_error', 0);
+    try {
+      markNeedsReview(this.deps.db, ticket.id, 'worker_error', 0);
+    } catch (dbErr) {
+      // Still "processing" in the database: the stuck-ticket recovery will requeue it.
+      console.error(`[worker] could not update ticket ${ticket.id}`, dbErr);
+    }
   }
 }
