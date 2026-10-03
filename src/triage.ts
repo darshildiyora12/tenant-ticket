@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { LLMProvider } from './providers/types';
+import type { ClassifyExample, LLMProvider } from './providers/types';
 import { triageResultSchema, type TriageResult } from './schemas';
 
 export type TriageOutcome =
@@ -36,6 +36,8 @@ export interface TriageOptions {
   confidenceThreshold: number;
   /** Longest time to wait for one LLM call. */
   timeoutMs: number;
+  /** Similar tickets that were already triaged, passed to the model as examples. */
+  examples?: ClassifyExample[];
 }
 
 export class LLMTimeoutError extends Error {
@@ -77,7 +79,7 @@ export async function triageTicket(
   const classify = (repairPrompt?: string): Promise<string> => {
     attempts++;
     return withTimeout(options.timeoutMs, (signal) =>
-      llm.classify(ticket.subject, ticket.body, { repairPrompt, signal }),
+      llm.classify(ticket.subject, ticket.body, { examples: options.examples, repairPrompt, signal }),
     );
   };
 

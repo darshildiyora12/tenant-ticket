@@ -1,4 +1,13 @@
+/** An already-triaged ticket shown to the model as an example. */
+export interface ClassifyExample {
+  subject: string;
+  category: string;
+  priority: string;
+}
+
 export interface ClassifyOptions {
+  /** Similar tickets of the same tenant that were already triaged (simple RAG). */
+  examples?: ClassifyExample[];
   /** Sent on the retry only: tells the model what was wrong with its first reply. */
   repairPrompt?: string;
   /** Aborted when the per-call timeout fires, so the provider can cancel its request. */

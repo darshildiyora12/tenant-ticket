@@ -2,8 +2,9 @@ import { Router, type Response } from 'express';
 import { z } from 'zod';
 import type { AppDeps } from '../app';
 import { createTicketSchema, searchQuerySchema } from '../schemas';
-import { rankBySimilarity } from '../search';
+import { rankBySimilarity, similarTriaged, toSearchResult } from '../search';
 import { findByIdempotencyKey, getTicket, insertTicket, toApiTicket } from '../tickets';
+import { fromBlob } from '../vector';
 
 /** 400 with one list of messages per invalid field. */
 function sendValidationError(res: Response, error: z.ZodError): void {
@@ -52,7 +53,22 @@ export function ticketRoutes(deps: AppDeps): Router {
 
     const { q, limit } = parsed.data;
     const queryVector = await embedder.embed(q);
-    res.json({ query: q, results: rankBySimilarity(db, tenantId, queryVector, limit) });
+    const results = rankBySimilarity(db, tenantId, queryVector, { limit }).map(toSearchResult);
+    res.json({ query: q, results });
+  });
+
+  router.get('/:id/similar', (req, res) => {
+    const tenantId: string = res.locals.tenantId;
+    const ticket = getTicket(db, tenantId, req.params.id);
+    if (!ticket) {
+      res.status(404).json({ error: 'not_found' });
+      return;
+    }
+    // A ticket the worker has not embedded yet has nothing to compare with.
+    const results = ticket.embedding
+      ? similarTriaged(db, tenantId, ticket.id, fromBlob(ticket.embedding)).map(toSearchResult)
+      : [];
+    res.json({ id: ticket.id, results });
   });
 
   router.get('/:id', (req, res) => {

@@ -56,6 +56,8 @@ export class MockLLM implements LLMProvider {
       return '{"category": "account", "priority": ';
     }
 
+    // options.examples is not used here: the mock follows fixed rules. A real
+    // provider would add the examples to its prompt.
     const text = `${subject} ${body}`.toLowerCase();
     return JSON.stringify({
       category: firstMatch(CATEGORY_RULES, text, 'other'),
